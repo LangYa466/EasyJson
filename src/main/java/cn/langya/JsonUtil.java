@@ -236,7 +236,7 @@ public class JsonUtil {
 
     public static void main(String[] args) {
         // 测试多层嵌套对象
-        String nestedObject = "{\"name\":\"LangYa466\",\"details\":{\"age\":25,\"languages\":[\"Java\",\"Python\"]}}";
+        String nestedObject = "{\"name\":\"LangYa466\",\"details\":{\"age\":13,\"languages\":[\"Java\",\"Kotiln\"]}}";
         Object parsedObject = parse(nestedObject);
         System.out.println("解析的对象: " + parsedObject);
 

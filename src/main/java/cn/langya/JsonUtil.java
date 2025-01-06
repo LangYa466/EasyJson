@@ -5,30 +5,51 @@ import java.util.regex.*;
 
 /**
  * 使用正则表达式进行JSON操作的工具类
- * 支持基本的JSON序列化和反序列化操作
+ * 支持基本的JSON序列化和反序列化操作，包括多层嵌套和类型解析
  *
  * @author LangYa466
  * @since 2025/1/6
  */
 public class JsonUtil {
-    private static final Pattern OBJECT_PATTERN = Pattern.compile("\\{(.*?)}");
-    private static final Pattern ARRAY_PATTERN = Pattern.compile("\\[(.*?)]");
-    private static final Pattern KEY_VALUE_PATTERN = Pattern.compile("\"(.*?)\":\"(.*?)\"");
+    private static final Pattern OBJECT_PATTERN = Pattern.compile("\\{(.*?)\\}");
+    private static final Pattern ARRAY_PATTERN = Pattern.compile("\\[(.*?)\\]");
+    private static final Pattern KEY_VALUE_PATTERN = Pattern.compile("\\\"(.*?)\\\":(.*?)(,|$)");
+    private static final Pattern STRING_PATTERN = Pattern.compile("\\\"(.*?)\\\"");
+    private static final Pattern NUMBER_PATTERN = Pattern.compile("-?\\d+(\\.\\d+)?");
 
     /**
-     * 将JSON字符串解析为Map
+     * 将JSON字符串解析为Map或List（支持多层嵌套）
      *
      * @param json JSON字符串
+     * @return 解析后的对象（Map 或 List）
+     */
+    public static Object parse(String json) {
+        json = json.trim();
+        if (json.startsWith("{")) {
+            return parseObject(json);
+        } else if (json.startsWith("[")) {
+            return parseArray(json);
+        } else {
+            throw new IllegalArgumentException("无效的JSON字符串: " + json);
+        }
+    }
+
+    /**
+     * 将JSON字符串解析为Map（支持多层嵌套）
+     *
+     * @param json JSON对象字符串
      * @return 表示JSON对象的Map
      */
-    public static Map<String, String> parseObject(String json) {
+    public static Map<String, Object> parseObject(String json) {
         Matcher objectMatcher = OBJECT_PATTERN.matcher(json);
         if (objectMatcher.find()) {
             String content = objectMatcher.group(1);
-            Map<String, String> result = new HashMap<>();
+            Map<String, Object> result = new HashMap<>();
             Matcher keyValueMatcher = KEY_VALUE_PATTERN.matcher(content);
             while (keyValueMatcher.find()) {
-                result.put(keyValueMatcher.group(1), keyValueMatcher.group(2));
+                String key = keyValueMatcher.group(1);
+                String value = keyValueMatcher.group(2).trim();
+                result.put(key, parseValue(value));
             }
             return result;
         }
@@ -36,29 +57,83 @@ public class JsonUtil {
     }
 
     /**
-     * 将JSON数组字符串解析为List
+     * 将JSON数组字符串解析为List（支持多层嵌套）
      *
      * @param json JSON数组字符串
      * @return 表示JSON数组的List
      */
-    public static List<String> parseArray(String json) {
+    public static List<Object> parseArray(String json) {
         Matcher arrayMatcher = ARRAY_PATTERN.matcher(json);
         if (arrayMatcher.find()) {
             String content = arrayMatcher.group(1);
-            return Arrays.asList(content.split(",\\s*"));
+            List<Object> result = new ArrayList<>();
+            for (String item : splitJsonArray(content)) {
+                result.add(parseValue(item.trim()));
+            }
+            return result;
         }
         throw new IllegalArgumentException("无效的JSON数组: " + json);
     }
 
     /**
-     * 将Map序列化为JSON字符串
+     * 根据字符串值解析成对应的Java对象
+     *
+     * @param value JSON值字符串
+     * @return 解析后的Java对象
+     */
+    private static Object parseValue(String value) {
+        if (value.startsWith("{")) {
+            return parseObject(value);
+        } else if (value.startsWith("[")) {
+            return parseArray(value);
+        } else if (STRING_PATTERN.matcher(value).matches()) {
+            return value.substring(1, value.length() - 1); // 去掉引号
+        } else if (NUMBER_PATTERN.matcher(value).matches()) {
+            return value.contains(".") ? Double.parseDouble(value) : Integer.parseInt(value);
+        } else if ("true".equals(value) || "false".equals(value)) {
+            return Boolean.parseBoolean(value);
+        } else if ("null".equals(value)) {
+            return null;
+        } else {
+            throw new IllegalArgumentException("无效的JSON值: " + value);
+        }
+    }
+
+    /**
+     * 分割JSON数组中的元素，支持嵌套结构
+     *
+     * @param content JSON数组内容（去掉外层括号）
+     * @return 分割后的元素列表
+     */
+    private static List<String> splitJsonArray(String content) {
+        List<String> result = new ArrayList<>();
+        int bracketLevel = 0;
+        StringBuilder currentItem = new StringBuilder();
+        for (char c : content.toCharArray()) {
+            if (c == ',' && bracketLevel == 0) {
+                result.add(currentItem.toString());
+                currentItem.setLength(0);
+            } else {
+                if (c == '{' || c == '[') bracketLevel++;
+                if (c == '}' || c == ']') bracketLevel--;
+                currentItem.append(c);
+            }
+        }
+        if (currentItem.length() > 0) {
+            result.add(currentItem.toString());
+        }
+        return result;
+    }
+
+    /**
+     * 将Map序列化为JSON字符串（支持多层嵌套）
      *
      * @param map 要序列化的Map
      * @return 表示Map的JSON字符串
      */
-    public static String toJsonObject(Map<String, String> map) {
+    public static String toJsonObject(Map<String, Object> map) {
         StringBuilder sb = new StringBuilder("{");
-        map.forEach((key, value) -> sb.append("\"").append(key).append("\":\"").append(value).append("\","));
+        map.forEach((key, value) -> sb.append("\"").append(key).append("\":").append(toJsonValue(value)).append(","));
         if (!map.isEmpty()) {
             sb.setLength(sb.length() - 1); // 移除末尾的逗号
         }
@@ -67,14 +142,14 @@ public class JsonUtil {
     }
 
     /**
-     * 将List序列化为JSON数组字符串
+     * 将List序列化为JSON数组字符串（支持多层嵌套）
      *
      * @param list 要序列化的List
      * @return 表示List的JSON数组字符串
      */
-    public static String toJsonArray(List<String> list) {
+    public static String toJsonArray(List<Object> list) {
         StringBuilder sb = new StringBuilder("[");
-        list.forEach(item -> sb.append("\"").append(item).append("\","));
+        list.forEach(item -> sb.append(toJsonValue(item)).append(","));
         if (!list.isEmpty()) {
             sb.setLength(sb.length() - 1); // 移除末尾的逗号
         }
@@ -83,49 +158,62 @@ public class JsonUtil {
     }
 
     /**
-     * 检查字符串是否是有效的JSON对象
+     * 将Java对象转换为JSON值字符串
+     *
+     * @param value Java对象
+     * @return JSON值字符串
+     */
+    private static String toJsonValue(Object value) {
+        if (value instanceof String) {
+            return "\"" + value + "\"";
+        } else if (value instanceof Map) {
+            return toJsonObject((Map<String, Object>) value);
+        } else if (value instanceof List) {
+            return toJsonArray((List<Object>) value);
+        } else {
+            return String.valueOf(value);
+        }
+    }
+
+    /**
+     * 验证字符串是否为有效的JSON对象
      *
      * @param json JSON字符串
-     * @return 如果是有效的JSON对象，返回true；否则返回false
+     * @return 如果是有效的JSON对象则返回true，否则返回false
      */
     public static boolean isValidJsonObject(String json) {
-        return OBJECT_PATTERN.matcher(json).matches();
+        try {
+            parseObject(json);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /**
-     * 检查字符串是否是有效的JSON数组
-     *
-     * @param json JSON字符串
-     * @return 如果是有效的JSON数组，返回true；否则返回false
-     */
-    public static boolean isValidJsonArray(String json) {
-        return ARRAY_PATTERN.matcher(json).matches();
-    }
-
-    /**
-     * 合并两个JSON对象
+     * 合并两个JSON对象，后者的键值会覆盖前者
      *
      * @param json1 第一个JSON对象字符串
      * @param json2 第二个JSON对象字符串
      * @return 合并后的JSON对象字符串
      */
     public static String mergeJsonObjects(String json1, String json2) {
-        Map<String, String> map1 = parseObject(json1);
-        Map<String, String> map2 = parseObject(json2);
+        Map<String, Object> map1 = parseObject(json1);
+        Map<String, Object> map2 = parseObject(json2);
         map1.putAll(map2);
         return toJsonObject(map1);
     }
 
     /**
-     * 根据前缀过滤JSON对象中的键
+     * 根据前缀过滤JSON对象的键值对
      *
      * @param json JSON对象字符串
-     * @param prefix 要过滤的键前缀
+     * @param prefix 键前缀
      * @return 过滤后的JSON对象字符串
      */
     public static String filterKeysByPrefix(String json, String prefix) {
-        Map<String, String> map = parseObject(json);
-        Map<String, String> filteredMap = new HashMap<>();
+        Map<String, Object> map = parseObject(json);
+        Map<String, Object> filteredMap = new HashMap<>();
         map.forEach((key, value) -> {
             if (key.startsWith(prefix)) {
                 filteredMap.put(key, value);
@@ -135,10 +223,10 @@ public class JsonUtil {
     }
 
     /**
-     * 统计JSON对象中键值对的数量
+     * 统计JSON对象中的键数量
      *
      * @param json JSON对象字符串
-     * @return 键值对的数量
+     * @return 键的数量
      */
     public static int countJsonObjectKeys(String json) {
         return parseObject(json).size();
@@ -148,64 +236,57 @@ public class JsonUtil {
      * 获取JSON对象中的所有键
      *
      * @param json JSON对象字符串
-     * @return 键的集合
+     * @return 键的列表
      */
-    public static Set<String> getJsonObjectKeys(String json) {
-        return parseObject(json).keySet();
+    public static List<String> getJsonObjectKeys(String json) {
+        return new ArrayList<>(parseObject(json).keySet());
     }
 
     /**
-     * 将JSON数组反转
+     * 反转JSON数组中的元素顺序
      *
      * @param json JSON数组字符串
      * @return 反转后的JSON数组字符串
      */
     public static String reverseJsonArray(String json) {
-        List<String> list = parseArray(json);
+        List<Object> list = parseArray(json);
         Collections.reverse(list);
         return toJsonArray(list);
     }
 
     public static void main(String[] args) {
-        // 测试解析对象
-        String jsonObject = "{\"name\":\"LangYa466\",\"project\":\"JsonUtil\"}";
-        Map<String, String> map = parseObject(jsonObject);
-        System.out.println("解析的Map: " + map);
+        // 测试多层嵌套对象
+        String nestedObject = "{\"name\":\"LangYa466\",\"details\":{\"age\":25,\"languages\":[\"Java\",\"Python\"]}}";
+        Object parsedObject = parse(nestedObject);
+        System.out.println("解析的对象: " + parsedObject);
 
-        // 测试解析数组
-        String jsonArray = "[\"item1\", \"item2\", \"item3\"]";
-        List<String> list = parseArray(jsonArray);
-        System.out.println("解析的List: " + list);
+        // 测试多层嵌套数组
+        String nestedArray = "[1, [2, 3], {\"key\":\"value\"}]";
+        Object parsedArray = parse(nestedArray);
+        System.out.println("解析的数组: " + parsedArray);
 
-        // 测试序列化对象
-        String serializedObject = toJsonObject(map);
+        // 测试序列化多层嵌套对象
+        String serializedObject = toJsonObject((Map<String, Object>) parsedObject);
         System.out.println("序列化对象: " + serializedObject);
 
-        // 测试序列化数组
-        String serializedArray = toJsonArray(list);
+        // 测试序列化多层嵌套数组
+        String serializedArray = toJsonArray((List<Object>) parsedArray);
         System.out.println("序列化数组: " + serializedArray);
 
-        // 测试有效JSON检查
-        System.out.println("是否为有效JSON对象: " + isValidJsonObject(jsonObject));
-        System.out.println("是否为有效JSON数组: " + isValidJsonArray(jsonArray));
+        // 测试其他方法
+        System.out.println("是否为有效JSON对象: " + isValidJsonObject(serializedObject));
 
-        // 测试合并JSON对象
-        String jsonObject2 = "{\"version\":\"1.0\",\"author\":\"LangYa466\"}";
-        String mergedObject = mergeJsonObjects(jsonObject, jsonObject2);
-        System.out.println("合并对象: " + mergedObject);
+        String json1 = "{\"a\":1,\"b\":2}";
+        String json2 = "{\"b\":3,\"c\":4}";
+        System.out.println("合并JSON对象: " + mergeJsonObjects(json1, json2));
 
-        // 测试按前缀过滤键
-        String filteredObject = filterKeysByPrefix(jsonObject, "pro");
-        System.out.println("过滤后的对象: " + filteredObject);
+        String filteredJson = filterKeysByPrefix(serializedObject, "d");
+        System.out.println("过滤后的JSON对象: " + filteredJson);
 
-        // 测试统计键数量
-        System.out.println("键数量: " + countJsonObjectKeys(jsonObject));
+        System.out.println("JSON对象键数量: " + countJsonObjectKeys(serializedObject));
 
-        // 测试获取所有键
-        System.out.println("对象的键: " + getJsonObjectKeys(jsonObject));
+        System.out.println("JSON对象的键: " + getJsonObjectKeys(serializedObject));
 
-        // 测试反转JSON数组
-        String reversedArray = reverseJsonArray(jsonArray);
-        System.out.println("反转后的数组: " + reversedArray);
+        System.out.println("反转JSON数组: " + reverseJsonArray(serializedArray));
     }
 }
